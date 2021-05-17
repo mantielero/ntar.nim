@@ -59,7 +59,8 @@ proc guessTarFormat*(fname:string):TarFormat =
   75 73 74 61 72 00 30 30: 0x101 (tar)
   75 73 74 61 72 20 20 00: 0x101 (tar)  
   ]#
-  let fs = newFileStream(fname, fmRead)
+  let fs = openFileStream(fname, fmRead)
+  defer: fs.close
 
   var buffer: array[8, uint8]
   discard fs.readData(buffer.addr, 6)
@@ -120,16 +121,15 @@ proc `$`(tf:TarFile):string =
 proc getFileList*(filename:TarFileName):seq[TarFile] =
   let fbs = newFileBitStream(filename, fmRead)
   defer: close(fbs)
+
   result = newSeq[TarFile]()
  
   var flag = true
   while not fbs.atEnd:
     let h = posixHeader.get(fbs)
 
-   # echo $h
     if h.name != "": # Only for not empty registers
       # Read the file contents.
-      echo "|",h.size,"|"
       var fileSize = h.size.strip.parseOctInt
       let alignedFileSize = roundup(fileSize, 512)  
       let position = fbs.getPosition 
@@ -151,28 +151,40 @@ proc extractAllFiles*( filename:TarFileName, destDir:string = "" ) =
     defer: fs.close
 
     fs.setPosition(fname.position)
+
     let data = fs.readStr(fname.alignedFileSize)[0 ..< fname.fileSize] 
 
     var fbw = newFileStream(destdir / fname.name, fmWrite)
     defer: close(fbw)
     fbw.write(data)
 
+
 proc uncompress*( filename: TgzFileName, destFile:string = ""):string =
   #createDir(destDir)
   let gzfs = newGzFileStream(filename)
+  defer: gzfs.close
+
+  var newFile = ""
   let (dir,name,ext) = splitFile(filename)
-  var newFile = dir / name & ".tar"
-  if newFile[^8..^1].toLower == ".tar.tar":
-    newFile = newFile[0..^4]
+  if ext == ".tgz":
+    newFile = dir / name & ".tar"
+  elif ext in [".gz", ".tar"]:
+    newFile = dir / name
 
   if destFile != "":
     newFile = destFile
   let fs = newFileStream(newFile, fmWrite)
   defer: fs.close()
 
+  const
+    chunkSize = 1024
+  var buffer: array[chunkSize, char]  
   while not gzfs.atEnd():
-    fs.write( gzfs.readAll() )
-
+    let n = gzfs.readData(buffer.addr, chunkSize )
+    fs.writeData(buffer.addr, n ) #sizeof(buffer))
+    #fs.write( gzfs.readAll() )
+  fs.close()
+  echo newFile
   return newFile
 
 when isMainModule:
