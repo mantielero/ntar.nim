@@ -34,7 +34,7 @@ proc `$`*(h:PosixHeader):string =
   result &= &"Mode: {h.mode}\n"
   result &= &"uid: {h.uid}\n"
   result &= &"gid: {h.gid}\n"
-  result &= &"size: {h.size.parseOctInt}\n"
+  result &= &"size: {h.size.strip.parseOctInt}\n"
   result &= &"mtime: {h.mtime}\n"
   result &= &"chksum: {h.chksum}\n"
   result &= &"typeflag: {h.typeflag}\n"
@@ -46,30 +46,6 @@ proc `$`*(h:PosixHeader):string =
   result &= &"devmajor: {h.devmajor}\n"
   result &= &"devminor: {h.devminor}\n"
   result &= &"prefix: {h.prefix}\n"        
-
-#[
-struct(starHeader):
-  s: name(100)
-  s: mode(8)
-  s: uid(8)
-  s: gid(8)
-  s: size(12)
-  s: mtime(12)
-  s: chksum(8)
-  s: typeflag(1)
-  s: linkname(100)
-  s: magic(6)
-  s: version(2)
-  s: uname(32)
-  s: gname(32)
-  s: devmajor(8)
-  s: devminor(8)
-  s: prefix(131)  # This is different
-  s: atime(12)    # This is different
-  s: ctime(12)    # This is different
-]#
-
-
 
 proc guessTarFormat*(fname:string):TarFormat =
   #[
@@ -145,13 +121,16 @@ proc getFileList*(filename:TarFileName):seq[TarFile] =
   let fbs = newFileBitStream(filename, fmRead)
   defer: close(fbs)
   result = newSeq[TarFile]()
-  #let endOfArchive = 
+ 
   var flag = true
   while not fbs.atEnd:
     let h = posixHeader.get(fbs)
+
+   # echo $h
     if h.name != "": # Only for not empty registers
       # Read the file contents.
-      var fileSize = h.size.parseOctInt
+      echo "|",h.size,"|"
+      var fileSize = h.size.strip.parseOctInt
       let alignedFileSize = roundup(fileSize, 512)  
       let position = fbs.getPosition 
       result &= TarFile(
@@ -163,7 +142,7 @@ proc getFileList*(filename:TarFileName):seq[TarFile] =
       )   
       fbs.setPosition(position + alignedFileSize)
 
-proc extractAllFiles( filename:TarFileName, destDir:string = "" ) =
+proc extractAllFiles*( filename:TarFileName, destDir:string = "" ) =
   createDir(destDir)
   let files = getFileList(filename)
 
@@ -178,11 +157,14 @@ proc extractAllFiles( filename:TarFileName, destDir:string = "" ) =
     defer: close(fbw)
     fbw.write(data)
 
-proc uncompress*( filename: TgzFileName, destFile:string = "") =
+proc uncompress*( filename: TgzFileName, destFile:string = ""):string =
   #createDir(destDir)
   let gzfs = newGzFileStream(filename)
   let (dir,name,ext) = splitFile(filename)
   var newFile = dir / name & ".tar"
+  if newFile[^8..^1].toLower == ".tar.tar":
+    newFile = newFile[0..^4]
+
   if destFile != "":
     newFile = destFile
   let fs = newFileStream(newFile, fmWrite)
@@ -190,6 +172,8 @@ proc uncompress*( filename: TgzFileName, destFile:string = "") =
 
   while not gzfs.atEnd():
     fs.write( gzfs.readAll() )
+
+  return newFile
 
 when isMainModule:
   import cligen
